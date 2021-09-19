@@ -19,6 +19,9 @@ class Music(commands.Cog, name="Music"):
 
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
 
+    def seconds_to_minutes_display(seconds):
+        return f"{seconds // 60:02d}:{seconds % 60:02d}"
+        
     @commands.command(name="join")
     async def join(self, ctx):
         voice = ctx.author.voice
@@ -91,7 +94,9 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="playing", aliases=['np'])
     async def playing(self, ctx):
-        await ctx.send("Playing song: {current_seconds} seconds of {music_seconds} seconds finished".format(current_seconds=self.current_seconds, music_seconds=self.music_seconds))
+        playing_progress = self.seconds_to_minutes_display(self.current_seconds)
+        song_length = self.seconds_to_minutes_display(self.music_seconds)
+        await ctx.send(f"Playing song: {playing_progress} of {song_length}")
 
 
 
