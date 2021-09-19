@@ -60,6 +60,10 @@ class SamBot(commands.Bot):
         @commands.is_owner()
         async def reload(ctx):
             sam_logger.info("Unloading Cogs")
+            # disconnect all voice clients while reloading
+            for voice_client in bot.voice_clients:
+                await voice_client.disconnect()
+
             if not self.unload_cogs():
                 sam_logger.error("Cogs already unloaded baka")
                 await ctx.send("Cogs already unloaded baka")
