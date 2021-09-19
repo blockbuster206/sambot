@@ -20,7 +20,7 @@ class Music(commands.Cog, name="Music"):
         self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
 
     def seconds_to_minutes_display(seconds):
-        return f"{seconds // 60:.2f}:{seconds % 60:.2f}"
+        return f"{seconds // 60:02d}:{seconds % 60:02d}"
         
     @commands.command(name="join")
     async def join(self, ctx):
