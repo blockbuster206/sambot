@@ -16,7 +16,7 @@ class Music(commands.Cog, name="Music"):
         self.current_seconds = None
         self.video_message = None
 
-    def seconds_to_minutes_display(seconds):
+    def seconds_to_minutes_display(self, seconds):
         return f"{seconds // 60:02d}:{seconds % 60:02d}"
         
     @commands.command(name="join")
