@@ -16,9 +16,6 @@ class Music(commands.Cog, name="Music"):
         self.current_seconds = None
         self.video_message = None
 
-
-        self.FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
-
     def seconds_to_minutes_display(seconds):
         return f"{seconds // 60:02d}:{seconds % 60:02d}"
         
@@ -67,7 +64,7 @@ class Music(commands.Cog, name="Music"):
             video_embed.add_field(name="Duration", value=video.duration)
 
             await self.video_message.edit(content=None, embed=video_embed)
-            currently_playing_ffmpeg = FFmpegPCMAudio(source=audio.url, executable="C:/ffmpeg/ffmpeg.exe", **self.FFMPEG_OPTIONS)
+            currently_playing_ffmpeg = FFmpegPCMAudio(source=audio.url, executable="ffmpeg")
             voice_client.play(currently_playing_ffmpeg)
             sam_logger.debug("Playing audio")
 
