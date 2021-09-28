@@ -1,6 +1,8 @@
 # For Jetbrains
 .idea
 
+sambot/cache
+
 # For Python
 # Byte-compiled / optimized / DLL files
 __pycache__/
