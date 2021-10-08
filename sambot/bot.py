@@ -105,6 +105,9 @@ class SamBot(commands.Bot):
         sam_logger.info("SAM-Bot is ready")
 
     async def on_command_error(self, ctx, error):
+        if isinstance(error, commands.CommandError):
+            sam_logger.error(error)
+
         if isinstance(error, commands.MissingRequiredArgument):
             params = []
             for param in list(ctx.command.params.items())[2:]:
