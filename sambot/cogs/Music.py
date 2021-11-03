@@ -188,7 +188,7 @@ class Music(commands.Cog, name="Music"):
                               after=lambda e: self.play_next(ctx))
             asyncio.run_coroutine_threadsafe(
                 ctx.send(f"Currently playing **{self.servers[ctx.guild.id]['current_song'].title}**"), self.bot.loop)
-            self.servers[ctx.guild.id].pop(0)
+            self.servers[ctx.guild.id]['queue'].pop(0)
 
     @commands.command(name="skip", aliases=['s'])
     async def skip(self, ctx):
