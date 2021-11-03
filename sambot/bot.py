@@ -63,7 +63,6 @@ class SamBot(commands.Bot):
             # disconnect all voice clients while reloading
             for voice_client in bot.voice_clients:
                 await voice_client.disconnect()
-
             if not self.unload_cogs():
                 sam_logger.error("Cogs already unloaded baka")
                 await ctx.send("Cogs already unloaded baka")
@@ -92,7 +91,7 @@ class SamBot(commands.Bot):
         if self.cogs_loaded:
             for cog in cogs:
                 bot.unload_extension("cogs.{cog}".format(cog=cog))
-                sam_logger.debug("Loaded {cog_name}".format(cog_name=cog))
+                sam_logger.debug("Unloaded {cog_name}".format(cog_name=cog))
             self.cogs_loaded = False
             return True
         return False

@@ -1,4 +1,7 @@
 from __future__ import unicode_literals
+
+import asyncio
+
 import yt_dlp
 
 import os.path
@@ -9,8 +12,13 @@ from discord import FFmpegPCMAudio
 from discord.ext import commands, tasks
 import logging
 import urllib.request
+import validators
 
 sam_logger = logging.getLogger("SAM-Bot" + "." + __name__)
+
+
+def seconds_to_minutes_display(seconds):
+    return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
 class DownloadUrl(threading.Thread):
@@ -25,7 +33,8 @@ class DownloadUrl(threading.Thread):
             self.downloading = True
             # Download the file from `url` and save it locally under `file_name`:
             os.makedirs('cache', exist_ok=True)
-            with urllib.request.urlopen(url) as response, open("cache/{yt_id}.m4a".format(yt_id=yt_id), 'wb') as out_file:
+            with urllib.request.urlopen(url) as response, open("cache/{yt_id}.m4a".format(yt_id=yt_id),
+                                                               'wb') as out_file:
                 data = response.read()  # a `bytes` object
                 out_file.write(data)
         except Exception as e:
@@ -48,13 +57,13 @@ class DownloadUrl(threading.Thread):
         return self._stop_event.is_set()
 
 
-class YoutubeAudio(yt_dlp.YoutubeDL):
-    def __init__(self, url):
+class Song(yt_dlp.YoutubeDL):
+    def __init__(self, url_or_search_term):
         yt_dlp.YoutubeDL.__init__(self, {'format': 'bestaudio/best', 'prefer_ffmpeg': True, 'quiet': True})
         # video data
         self.video_info = None
         self.yt_id = None
-        self.youtube_url = url
+        self.youtube_url_or_search_term = url_or_search_term
 
         self.thumbnail = None
         self.title = None
@@ -63,21 +72,28 @@ class YoutubeAudio(yt_dlp.YoutubeDL):
         self.download_thread = None
         self.audio_url = None
 
-    def get_youtube_id(self):
-        # get yt id
+    def get_video_id(self, url):
         regex = re.compile(
             r'(https?://)?(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/(watch\?v=|embed/|v/|.+\?v=)?(?P<id>[A-Za-z0-9\-=_]{11})')
-        match = regex.match(self.youtube_url)
+        match = regex.match(url)
         if match:
             self.yt_id = match.group('id')
-            sam_logger.error("Got youtube video id")
-        if not match:
-            sam_logger.error("Could not find youtube id")
-            self.yt_id = None
 
     def get_video_info(self):
-        self.get_youtube_id()
-        self.video_info = self.extract_info("https://youtu.be/{yt_id}".format(yt_id=self.yt_id), download=False)
+        sam_logger.debug("Getting youtube video metadata")
+        if validators.url(self.youtube_url_or_search_term[0]):
+            self.get_video_id(self.youtube_url_or_search_term[0])
+            self.video_info = self.extract_info("https://youtu.be/{0}".format(self.yt_id), download=False)
+        else:
+            sam_logger.debug(f"Searching for {' '.join(self.youtube_url_or_search_term)}")
+            self.video_info = \
+            self.extract_info(f"ytsearch1:{' '.join(self.youtube_url_or_search_term)}", download=False)['entries'][0]
+            if self.video_info:
+                sam_logger.debug(f"Found {' '.join(self.youtube_url_or_search_term)}")
+                self.get_video_id(self.video_info['webpage_url'])
+            else:
+                sam_logger.debug(f"Couldn't find {' '.join(self.youtube_url_or_search_term)}")
+                self.yt_id = None
         self.title = self.video_info['title']
         self.author = self.video_info['uploader']
         self.audio_url = self.video_info['formats'][1]['url']
@@ -104,120 +120,95 @@ class YoutubeAudio(yt_dlp.YoutubeDL):
         self.download_thread.stop()
 
     def is_finished_downloading(self):
-        self.download_thread.is_stopped()
-
-
-def seconds_to_minutes_display(seconds):
-    return f"{seconds // 60:02d}:{seconds % 60:02d}"
+        return self.download_thread.is_stopped()
 
 
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot):
         self.bot = bot
         self.playing_index = 0
-        self.queue = []
+        self.servers = {}
         self.music_seconds = None
         self.current_seconds = None
-        self.video_message = None
 
-    @commands.command(name="join")
-    async def join(self, ctx):
+    @commands.command(name="connect", aliases=['join', 'john'])
+    async def connect(self, ctx):
         voice = ctx.author.voice
         if voice:
-            sam_logger.debug("Joining voice chat")
-            self.video_message = await ctx.send("Joined voice chat")
-            await voice.channel.connect()
-            return discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-        await self.video_message.edit("You need to be in a voice channel idot")
-        sam_logger.debug("User is not in voice chat")
+            if discord.utils.get(self.bot.voice_clients, guild=ctx.guild):
+                await ctx.send("Already connected to voice chat!")
+            else:
+                await ctx.send("Joined voice chat!")
+                await voice.channel.connect()
+        else:
+            await ctx.send("You need to be in a voice channel idot")
 
-    @commands.command(name="leave", aliases=("dc", "disconnect"))
+    @commands.command(name="disconnect", aliases=("dc", "leave"))
     async def leave(self, ctx):
         voice = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
         if voice.is_connected():
             await voice.disconnect()
 
     @commands.command(name="play", aliases=("p",))
-    async def play(self, ctx, url):
-        # get and send video audio
-
-        await ctx.message.delete()
-
-        self.queue.append(YoutubeAudio(url))
-
-        await self.play_next(ctx)
-
-    async def play_next(self, ctx):
-        voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-        if not self.queue or self.current_seconds:
+    async def play(self, ctx, *url_or_search_term):
+        # init list if it doesnt exist
+        voice = ctx.author.voice
+        if voice:
+            if not discord.utils.get(self.bot.voice_clients, guild=ctx.guild):
+                await ctx.send("Joined voice chat!")
+                await voice.channel.connect()
+        else:
+            await ctx.send("You need to be in a voice channel idot")
             return
 
-        if not voice_client:
-            voice_client = await self.join(ctx)
-        if voice_client:
-            voice_client.stop()
-            self.music_player_loop.stop()
-            sam_logger.debug("Getting audio url")
-            await self.video_message.edit(content="Loading Music")
+        voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+        if not ctx.guild.id in self.servers:
+            self.servers[ctx.guild.id] = []
 
-            youtube_video = self.queue[self.playing_index]
-            youtube_video.get_video_info()
+        video = Song(url_or_search_term)
+        await ctx.send(f"Searching for `{' '.join(url_or_search_term)}`")
+        video.get_video_info()
+        await ctx.send(f"Found `{' '.join(url_or_search_term)}`")
+        if not voice_client.is_playing():
+            await ctx.send(f"Currently playing **{video.title}**")
+            voice_client.play(source=FFmpegPCMAudio(video.audio_url), after=lambda e: self.play_next(ctx))
+        else:
+            await ctx.send(f"Added **{video.title}** to the queue")
+            self.servers[ctx.guild.id].append(video)
 
-            video_embed = discord.Embed(title=f"Playing {youtube_video.title}")
-            video_embed.url = youtube_video.youtube_url
-            video_embed.set_image(url=youtube_video.thumbnail + "?size=640x385")
-            video_embed.set_footer(text="Requested by {user}".format(user=ctx.author.name))
-
-            video_embed.add_field(name="Duration", value=youtube_video.duration['length'])
-
-            await self.video_message.edit(content=None, embed=video_embed)
-
-            url_or_path, needs_caching = youtube_video.get_audio_url_or_path()
-            if needs_caching:
-                youtube_video.cache_audio()
-            currently_playing_ffmpeg = FFmpegPCMAudio(source=url_or_path)
-            voice_client.play(currently_playing_ffmpeg)
-            sam_logger.debug("Playing audio")
-
-            self.current_seconds = 0
-            self.music_seconds = youtube_video.duration['total_seconds']
-
-            self.music_player_loop.start(ctx)
+    def play_next(self, ctx):
+        if len(self.servers[ctx.guild.id]) >= 1:
+            voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+            voice_client.play(source=FFmpegPCMAudio(self.servers[ctx.guild.id][0].audio_url), after=lambda e: self.play_next(ctx))
+            asyncio.run_coroutine_threadsafe(ctx.send(f"Currently playing **{self.servers[ctx.guild.id][0].title}**"), self.bot.loop)
+            self.servers[ctx.guild.id].pop(0)
 
     @commands.command(name="skip", aliases=['s'])
     async def skip(self, ctx):
-        self.queue[self.playing_index].stop_downloading()
-        self.current_seconds = 0
-        self.queue.pop(0)
-        await self.play_next(ctx)
-
-    @tasks.loop(seconds=1.0)
-    async def music_player_loop(self, ctx):
-        self.current_seconds += 1
-        if self.current_seconds >= self.music_seconds:
-            await self.skip(ctx)
-
-    @music_player_loop.after_loop
-    async def after_music_player_loop(self):
-        await self.video_message.edit(embed=discord.Embed(title="Finished Playing song"))
+        voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+        voice_client.stop()
 
     @commands.command(name="queue", aliases=["q"])
     async def queue(self, ctx):
+        if not ctx.guild.id in self.servers:
+            self.servers[ctx.guild.id] = []
+
         emb = discord.Embed(title="Queue")
-        if self.queue:
-            for item in self.queue:
-                emb.add_field(name=f"{self.queue.index(item) + 1}. {item.title}", value=item.duration['length'], inline=False)
+        if self.servers[ctx.guild.id]:
+            for song in self.servers[ctx.guild.id]:
+                emb.add_field(name=f"{self.servers[ctx.guild.id].index(song) + 1}. {song.title}",
+                              value=song.duration['length'],
+                              inline=False)
         else:
-            emb.add_field(name="Nothing playing", value="Use ,play to play something.")
+            emb.add_field(name="Nothing is queued", value="Use ,play to add something.")
         await ctx.send(embed=emb)
 
     @commands.command(name="stop")
     async def stop(self, ctx):
-        sam_logger.debug("Stopping Song")
-        # self.queue[self.playing_index].stop_downloading()
-        voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-        voice_client.stop()
-        self.music_player_loop.stop()
+        # sam_logger.debug("Stopping Song")
+        # voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+        # voice_client.stop()
+        pass
 
     @commands.command(name="playing", aliases=['np'])
     async def playing(self, ctx):
