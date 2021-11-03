@@ -217,12 +217,12 @@ class Music(commands.Cog, name="Music"):
             emb.add_field(name="Nothing is queued", value="Use ,play to add something.")
         await ctx.send(embed=emb)
 
-    @commands.command(name="stop")
-    async def stop(self, ctx):
-        # sam_logger.debug("Stopping Song")
-        # voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-        # voice_client.stop()
-        pass
+    # @commands.command(name="stop")
+    # async def stop(self, ctx):
+    #     sam_logger.debug("Stopping Song")
+    #     voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+    #     voice_client.stop()
+    #     pass
 
     @commands.command(name="playing", aliases=['np'])
     async def playing(self, ctx):
