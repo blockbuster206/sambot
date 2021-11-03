@@ -87,7 +87,8 @@ class Song(yt_dlp.YoutubeDL):
         else:
             sam_logger.debug(f"Searching for {' '.join(self.youtube_url_or_search_term)}")
             self.video_info = \
-            self.extract_info(f"ytsearch1:{' '.join(self.youtube_url_or_search_term)}", download=False)['entries'][0]
+                self.extract_info(f"ytsearch1:{' '.join(self.youtube_url_or_search_term)}", download=False)['entries'][
+                    0]
             if self.video_info:
                 sam_logger.debug(f"Found {' '.join(self.youtube_url_or_search_term)}")
                 self.get_video_id(self.video_info['webpage_url'])
@@ -129,7 +130,6 @@ class Music(commands.Cog, name="Music"):
         self.playing_index = 0
         self.servers = {}
         self.music_seconds = None
-        self.current_seconds = None
 
     @commands.command(name="connect", aliases=['join', 'john'])
     async def connect(self, ctx):
@@ -163,13 +163,17 @@ class Music(commands.Cog, name="Music"):
 
         voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
         if not ctx.guild.id in self.servers:
-            self.servers[ctx.guild.id] = []
+            self.servers[ctx.guild.id] = {
+                'current_song': None,
+                'queue': []
+            }
 
         video = Song(url_or_search_term)
         await ctx.send(f"Searching for `{' '.join(url_or_search_term)}`")
         video.get_video_info()
         await ctx.send(f"Found `{' '.join(url_or_search_term)}`")
         if not voice_client.is_playing():
+            self.servers[ctx.guild.id]['current_song'] = video
             await ctx.send(f"Currently playing **{video.title}**")
             voice_client.play(source=FFmpegPCMAudio(video.audio_url), after=lambda e: self.play_next(ctx))
         else:
@@ -177,10 +181,13 @@ class Music(commands.Cog, name="Music"):
             self.servers[ctx.guild.id].append(video)
 
     def play_next(self, ctx):
-        if len(self.servers[ctx.guild.id]) >= 1:
+        if len(self.servers[ctx.guild.id]['queue']) >= 1:
+            self.servers[ctx.guild.id]['current_song'] = self.servers[ctx.guild.id]['queue'][0]
             voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-            voice_client.play(source=FFmpegPCMAudio(self.servers[ctx.guild.id][0].audio_url), after=lambda e: self.play_next(ctx))
-            asyncio.run_coroutine_threadsafe(ctx.send(f"Currently playing **{self.servers[ctx.guild.id][0].title}**"), self.bot.loop)
+            voice_client.play(source=FFmpegPCMAudio(self.servers[ctx.guild.id]['current_song'].audio_url),
+                              after=lambda e: self.play_next(ctx))
+            asyncio.run_coroutine_threadsafe(
+                ctx.send(f"Currently playing **{self.servers[ctx.guild.id]['current_song'].title}**"), self.bot.loop)
             self.servers[ctx.guild.id].pop(0)
 
     @commands.command(name="skip", aliases=['s'])
@@ -191,12 +198,19 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="queue", aliases=["q"])
     async def queue(self, ctx):
         if not ctx.guild.id in self.servers:
-            self.servers[ctx.guild.id] = []
+            self.servers[ctx.guild.id] = {
+                'current_song': None,
+                'queue': []
+            }
 
         emb = discord.Embed(title="Queue")
-        if self.servers[ctx.guild.id]:
-            for song in self.servers[ctx.guild.id]:
-                emb.add_field(name=f"{self.servers[ctx.guild.id].index(song) + 1}. {song.title}",
+        if self.servers[ctx.guild.id]['current_song']:
+            emb.add_field(name=f"Currently playing. {self.servers[ctx.guild.id]['current_song'].title}",
+                          value=self.servers[ctx.guild.id]['current_song'].duration['length'],
+                          inline=False)
+        if self.servers[ctx.guild.id]['queue']:
+            for song in self.servers[ctx.guild.id]['queue']:
+                emb.add_field(name=f"{self.servers[ctx.guild.id]['queue'].index(song) + 1}. {song.title}",
                               value=song.duration['length'],
                               inline=False)
         else:
@@ -212,8 +226,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="playing", aliases=['np'])
     async def playing(self, ctx):
-        song_length = seconds_to_minutes_display(self.music_seconds)
-        await ctx.send(f"Playing song: **{self.queue[self.playing_index].title}**\n{song_length}")
+        await ctx.send(f"Playing song: **{self.servers[ctx.guild.id]['current_song'].title}**\n{self.servers[ctx.guild.id]['current_song'].duration['length']}")
 
 
 def setup(bot):
