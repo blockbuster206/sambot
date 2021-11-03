@@ -178,7 +178,7 @@ class Music(commands.Cog, name="Music"):
             voice_client.play(source=FFmpegPCMAudio(video.audio_url), after=lambda e: self.play_next(ctx))
         else:
             await ctx.send(f"Added **{video.title}** to the queue")
-            self.servers[ctx.guild.id].append(video)
+            self.servers[ctx.guild.id]['queue'].append(video)
 
     def play_next(self, ctx):
         if len(self.servers[ctx.guild.id]['queue']) >= 1:
