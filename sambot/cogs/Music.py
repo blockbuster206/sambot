@@ -212,10 +212,8 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="playing", aliases=['np'])
     async def playing(self, ctx):
-        playing_progress = seconds_to_minutes_display(self.current_seconds)
         song_length = seconds_to_minutes_display(self.music_seconds)
-        await ctx.send(
-            f"Playing song: **{self.queue[self.playing_index].title}**\nProgress: {playing_progress} of {song_length}")
+        await ctx.send(f"Playing song: **{self.queue[self.playing_index].title}**\n{song_length}")
 
 
 def setup(bot):
