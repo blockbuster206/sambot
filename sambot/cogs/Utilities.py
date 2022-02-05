@@ -11,7 +11,7 @@ class Utilities(commands.Cog, name="Utilities"):
     @commands.command()
     async def logout(self, ctx):
         await self.bot.close()
-        exit()
+        raise KeyboardInterrupt
 
 
 def setup(bot):

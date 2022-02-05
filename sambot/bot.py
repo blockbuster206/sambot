@@ -103,15 +103,16 @@ class SamBot(commands.Bot):
         self.load_cogs()
         sam_logger.info("SAM-Bot is ready")
 
-    # async def on_command_error(self, ctx, error):
-    #     if isinstance(error, commands.CommandError):
-    #         sam_logger.error(error)
-    #
-    #     if isinstance(error, commands.MissingRequiredArgument):
-    #         params = []
-    #         for param in list(ctx.command.params.items())[2:]:
-    #             params.append(param[0])
-    #         await ctx.send('Missing Arguments: {args}'.format(args=", ".join(params)))
+    async def on_command_error(self, ctx, error):
+        if isinstance(error, commands.CommandError):
+            sam_logger.error(error)
+
+        if isinstance(error, commands.MissingRequiredArgument):
+            params = []
+            for param in list(ctx.command.params.items())[2:]:
+                params.append(param[0])
+            await ctx.send('Missing Arguments: {args}'.format(args=", ".join(params)))
+
 
 bot = SamBot(command_prefix=",", self_bot=False)
 bot.run(TOKEN)
