@@ -68,6 +68,25 @@ class DownloadUrl(threading.Thread):
         return self._stop_event.is_set()
 
 
+class GetSongData(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self, target=self.iterate_added_songs, daemon=True)
+        self.list = []
+
+    def add_song(self, song, after):
+        self.list.append([song, after])
+
+    def iterate_added_songs(self):
+        while True:
+            try:
+                song = self.list[0]
+                song[0].get_video_info()
+                threading.Thread(target=song[1], daemon=True).start()
+                self.list.pop(0)
+            except IndexError:
+                pass
+
+
 class SongTimer(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self, target=self.run, daemon=True)
@@ -129,7 +148,6 @@ class Song(yt_dlp.YoutubeDL):
             else:
                 sam_logger.debug(f"Couldn't find {' '.join(self.youtube_url_or_search_term)}")
                 self.yt_id = None
-                return
         self.title = self.video_info['title']
         self.author = self.video_info['uploader']
         formats = self.video_info['formats']
@@ -163,6 +181,17 @@ class Music(commands.Cog, name="Music"):
         self.playing_index = 0
         self.servers = {}
         self.music_seconds = None
+        self.video_getter = GetSongData()
+        self.video_getter.start()
+
+    def ensure_guild_in_list(self, guild_id):
+        if not guild_id in self.servers:
+            self.servers[guild_id] = {
+                'current_song': None,
+                'queue': [],
+                'loop': False,
+                'timer': None
+            }
 
     @commands.command(name="connect", aliases=['join', 'john'])
     async def connect(self, ctx):
@@ -194,56 +223,44 @@ class Music(commands.Cog, name="Music"):
             await ctx.send("You need to be in a voice channel idot")
             return
 
-        voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-        if not ctx.guild.id in self.servers:
-            self.servers[ctx.guild.id] = {
-                'current_song': None,
-                'queue': [],
-                'loop': False,
-                'timer': None
-            }
-        await ctx.send("qued")
-        threading.Thread(
-            target=lambda: self.play_thread(ctx, voice_client, url_or_search_term), daemon=True).start()
+        self.ensure_guild_in_list(ctx.guild.id)
 
-    def play_thread(self, ctx, voice_client, url_or_term):
-        video = Song(url_or_term)
-        video.get_video_info()
+        await ctx.send("qued")
+        song = Song(url_or_search_term)
+        self.servers[ctx.guild.id]['timer'] = SongTimer()
+        self.servers[ctx.guild.id]['current_song'] = song
+        self.video_getter.add_song(song, lambda: self.play_song(ctx, song))
+
+    def play_song(self, ctx, song):
+        voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+
         if not voice_client.is_playing():
-            self.servers[ctx.guild.id]['timer'] = SongTimer()
-            self.servers[ctx.guild.id]['current_song'] = video
-            audio_path, requires_caching, real_audio_path = video.get_audio_url_or_path()
+            audio_path, requires_caching, real_audio_path = song.get_audio_url_or_path()
             if requires_caching:
                 voice_client.play(source=FFmpegPCMAudio(audio_path))
                 self.servers[ctx.guild.id]['timer'].start()
-                video.download_thread.join()
+                song.download_thread.join()
                 voice_client.stop()
-                voice_client.play(source=FFmpegPCMAudio(real_audio_path, before_options=f"-vn -ss {self.servers[ctx.guild.id]['timer'].seconds}"), after=lambda e: self.play_next(ctx))
+                voice_client.play(source=FFmpegPCMAudio(real_audio_path,
+                                                        before_options=f"-vn -ss {self.servers[ctx.guild.id]['timer'].seconds}"),
+                                  after=lambda e: self.play_next(ctx))
             else:
                 voice_client.play(source=FFmpegPCMAudio(real_audio_path), after=lambda e: self.play_next(ctx))
                 self.servers[ctx.guild.id]['timer'].start()
         else:
-            self.servers[ctx.guild.id]['queue'].append(video)
+            self.servers[ctx.guild.id]['queue'].append(song)
 
     def play_next(self, ctx):
+        ctype_async_raise(self.servers[ctx.guild.id]['timer'].ident, StopIteration)
+        self.servers[ctx.guild.id]['current_song'] = None
         if len(self.servers[ctx.guild.id]['queue']) >= 1:
-            self.servers[ctx.guild.id]['current_song'] = self.servers[ctx.guild.id]['queue'][0]
+            song = self.servers[ctx.guild.id]['queue']
+            self.servers[ctx.guild.id]['queue'].pop(0)
             self.servers[ctx.guild.id]['timer'] = SongTimer()
-            voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-            audio_path, requires_caching, \
-            real_audio_path = self.servers[ctx.guild.id]['current_song'].get_audio_url_or_path()
-            if requires_caching:
-                voice_client.play(source=FFmpegPCMAudio(audio_path))
-                self.servers[ctx.guild.id]['timer'].start()
-                self.servers[ctx.guild.id]['current_song'].download_thread.join()
-                voice_client.stop()
-                ffmpeg_options = {'options': f"-vn -ss {self.servers[ctx.guild.id]['timer'].seconds}"}
-                voice_client.play(source=FFmpegPCMAudio(real_audio_path, before_options=f"-vn -ss {self.servers[ctx.guild.id]['timer'].seconds}"), after=lambda e: self.play_next(ctx))
-            else:
-                voice_client.play(source=FFmpegPCMAudio(real_audio_path), after=lambda e: self.play_next(ctx))
+            self.servers[ctx.guild.id]['current_song'] = song
             asyncio.run_coroutine_threadsafe(
                 ctx.send(f"Currently playing **{self.servers[ctx.guild.id]['current_song'].title}**"), self.bot.loop)
-            self.servers[ctx.guild.id]['queue'].pop(0)
+            self.play_song(ctx, song)
 
     @commands.command(name="skip", aliases=['s'])
     async def skip(self, ctx):
@@ -252,13 +269,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="queue", aliases=["q"])
     async def queue(self, ctx):
-        if not ctx.guild.id in self.servers:
-            self.servers[ctx.guild.id] = {
-                'current_song': None,
-                'queue': [],
-                'loop': False,
-                'timer': None
-            }
+        self.ensure_guild_in_list(ctx.guild.id)
 
         emb = discord.Embed(title="Queue")
         if self.servers[ctx.guild.id]['current_song']:
@@ -288,7 +299,9 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="playing", aliases=['np'])
     async def playing(self, ctx):
         await ctx.send(
-            f"Playing song: **{self.servers[ctx.guild.id]['current_song'].title}**\n{self.servers[ctx.guild.id]['current_song'].duration['length']}")
+            f"Playing song: **{self.servers[ctx.guild.id]['current_song'].title}**\n"
+            f"{seconds_to_minutes_display(self.servers[ctx.guild.id]['timer'].seconds)}/"
+            f"{self.servers[ctx.guild.id]['current_song'].duration['length']}")
 
 
 def setup(bot):
