@@ -51,6 +51,7 @@ class DownloadUrl(threading.Thread):
                 out_file.write(data)
             self._stop_event.set()
         except StopIteration:
+            sam_logger.debug(f"Download thread cancelled ({self.yt_id})")
             out_file.truncate(0)
             os.remove(f"cache/{yt_id}.m4a")
         finally:
@@ -73,7 +74,7 @@ class GetSongData(threading.Thread):
         threading.Thread.__init__(self, target=self.iterate_added_songs, daemon=True)
         self.list = []
 
-    def add_song(self, song, after):
+    def add_song(self, song, after=None):
         self.list.append([song, after])
 
     def iterate_added_songs(self):
@@ -81,7 +82,8 @@ class GetSongData(threading.Thread):
             try:
                 song = self.list[0]
                 song[0].get_video_info()
-                threading.Thread(target=song[1], daemon=True).start()
+                if song[1]:
+                    threading.Thread(target=song[1], daemon=True).start()
                 self.list.pop(0)
             except IndexError:
                 pass
@@ -190,7 +192,8 @@ class Music(commands.Cog, name="Music"):
                 'current_song': None,
                 'queue': [],
                 'loop': False,
-                'timer': None
+                'timer': None,
+                'skipping': False
             }
 
     @commands.command(name="connect", aliases=['join', 'john'])
@@ -227,23 +230,29 @@ class Music(commands.Cog, name="Music"):
 
         await ctx.send("qued")
         song = Song(url_or_search_term)
-        self.servers[ctx.guild.id]['timer'] = SongTimer()
-        self.servers[ctx.guild.id]['current_song'] = song
         self.video_getter.add_song(song, lambda: self.play_song(ctx, song))
 
     def play_song(self, ctx, song):
+        self.servers[ctx.guild.id]['skipping'] = False
         voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-
         if not voice_client.is_playing():
+            self.servers[ctx.guild.id]['timer'] = SongTimer()
+            self.servers[ctx.guild.id]['current_song'] = song
+            asyncio.run_coroutine_threadsafe(
+                ctx.send(f"Currently playing **{song.title}**"), self.bot.loop)
             audio_path, requires_caching, real_audio_path = song.get_audio_url_or_path()
             if requires_caching:
                 voice_client.play(source=FFmpegPCMAudio(audio_path))
                 self.servers[ctx.guild.id]['timer'].start()
                 song.download_thread.join()
-                voice_client.stop()
-                voice_client.play(source=FFmpegPCMAudio(real_audio_path,
-                                                        before_options=f"-vn -ss {self.servers[ctx.guild.id]['timer'].seconds}"),
-                                  after=lambda e: self.play_next(ctx))
+                if self.servers[ctx.guild.id]['skipping']:
+                    ctype_async_raise(self.servers[ctx.guild.id]['timer'].ident, StopIteration)
+                    self.servers[ctx.guild.id]['skipping'] = False
+                else:
+                    voice_client.stop()
+                    voice_client.play(source=FFmpegPCMAudio(
+                        real_audio_path, before_options=f"-vn -ss {self.servers[ctx.guild.id]['timer'].seconds}"),
+                                      after=lambda e: self.play_next(ctx))
             else:
                 voice_client.play(source=FFmpegPCMAudio(real_audio_path), after=lambda e: self.play_next(ctx))
                 self.servers[ctx.guild.id]['timer'].start()
@@ -254,16 +263,15 @@ class Music(commands.Cog, name="Music"):
         ctype_async_raise(self.servers[ctx.guild.id]['timer'].ident, StopIteration)
         self.servers[ctx.guild.id]['current_song'] = None
         if len(self.servers[ctx.guild.id]['queue']) >= 1:
-            song = self.servers[ctx.guild.id]['queue']
+            song = self.servers[ctx.guild.id]['queue'][0]
             self.servers[ctx.guild.id]['queue'].pop(0)
-            self.servers[ctx.guild.id]['timer'] = SongTimer()
-            self.servers[ctx.guild.id]['current_song'] = song
-            asyncio.run_coroutine_threadsafe(
-                ctx.send(f"Currently playing **{self.servers[ctx.guild.id]['current_song'].title}**"), self.bot.loop)
             self.play_song(ctx, song)
 
     @commands.command(name="skip", aliases=['s'])
     async def skip(self, ctx):
+        if self.servers[ctx.guild.id]['current_song']:
+            self.servers[ctx.guild.id]['current_song'].download_thread.stop()
+            self.servers[ctx.guild.id]['skipping'] = True
         voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
         voice_client.stop()
 
@@ -300,7 +308,7 @@ class Music(commands.Cog, name="Music"):
     async def playing(self, ctx):
         await ctx.send(
             f"Playing song: **{self.servers[ctx.guild.id]['current_song'].title}**\n"
-            f"{seconds_to_minutes_display(self.servers[ctx.guild.id]['timer'].seconds)}/"
+            f"{seconds_to_minutes_display(round(self.servers[ctx.guild.id]['timer'].seconds))}/"
             f"{self.servers[ctx.guild.id]['current_song'].duration['length']}")
 
 
