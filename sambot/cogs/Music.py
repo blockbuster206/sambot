@@ -14,6 +14,7 @@ import ctypes
 import time
 
 sam_logger = logging.getLogger("SAM-Bot" + "." + __name__)
+thread_counts = 0
 
 
 def ctype_async_raise(target_tid, exception):
@@ -41,6 +42,8 @@ class DownloadUrl(threading.Thread):
         self.downloading = False
 
     def download(self, url, yt_id):
+        global thread_counts
+        thread_counts += 1
         out_file = open(f"cache/{yt_id}.m4a", 'wb+')
         try:
             sam_logger.debug(f"Started download thread ({yt_id})")
@@ -57,6 +60,7 @@ class DownloadUrl(threading.Thread):
         finally:
             sam_logger.debug(f"Stopped download thread ({self.yt_id})")
             self.downloading = False
+            thread_counts -= 1
 
     def stop(self):
         if not self.is_stopped():
@@ -78,6 +82,8 @@ class GetSongData(threading.Thread):
         self.list.append([song, after])
 
     def iterate_added_songs(self):
+        global thread_counts
+        thread_counts += 1
         while True:
             try:
                 song = self.list[0]
@@ -95,12 +101,14 @@ class SongTimer(threading.Thread):
         self.seconds = 0
 
     def run(self):
+        global thread_counts
+        thread_counts += 1
         try:
             while True:
                 self.seconds += 0.1
                 time.sleep(0.1)
         except StopIteration:
-            pass
+            thread_counts -= 1
 
 
 class Song(yt_dlp.YoutubeDL):
@@ -135,7 +143,6 @@ class Song(yt_dlp.YoutubeDL):
             self.yt_id = match.group('id')
 
     def get_video_info(self):
-        sam_logger.debug("Getting youtube video metadata")
         if validators.url(self.youtube_url_or_search_term[0]):
             self.get_video_id(self.youtube_url_or_search_term[0])
             self.video_info = self.extract_info("https://youtu.be/{0}".format(self.yt_id), download=False)
@@ -150,22 +157,28 @@ class Song(yt_dlp.YoutubeDL):
             else:
                 sam_logger.debug(f"Couldn't find {' '.join(self.youtube_url_or_search_term)}")
                 self.yt_id = None
+        sam_logger.debug(f"Getting youtube video metadata ({self.yt_id})")
         self.title = self.video_info['title']
         self.author = self.video_info['uploader']
         formats = self.video_info['formats']
-        self.audio_url = formats[3]['url']
+        specified_format = None
+        for i in formats:
+            if not i["height"] and not i["width"] and i["ext"] == "m4a" and i["format_note"] == "low":
+                specified_format = i
+        self.audio_url = specified_format["url"]
         thumbnails = self.video_info['thumbnails']
         thumbnails.reverse()
         self.thumbnail = thumbnails[0]['url']
         self.duration['total_seconds'] = self.video_info['duration']
         self.duration['length'] = seconds_to_minutes_display(self.video_info['duration'])
+        sam_logger.debug(f"Got youtube video metadata ({self.yt_id})")
 
     def get_audio_url_or_path(self):
         if os.path.isfile("cache/{yt_id}.m4a".format(yt_id=self.yt_id)):
             sam_logger.debug("No need to cache video")
             return f"cache/{self.yt_id}.m4a", False, f"cache/{self.yt_id}.m4a"
         else:
-            sam_logger.debug("Caching video")
+            sam_logger.debug(f"Caching video ({self.yt_id})")
             self.download_thread = DownloadUrl(self.audio_url, self.yt_id)
             self.download_thread.start()
             return self.audio_url, True, f"cache/{self.yt_id}.m4a"
