@@ -127,6 +127,7 @@ class Song(yt_dlp.YoutubeDL):
         self.yt_id = None
         self.youtube_url_or_search_term = url_or_search_term
 
+        self.youtube = None
         self.thumbnail = None
         self.title = None
         self.author = None
@@ -141,11 +142,18 @@ class Song(yt_dlp.YoutubeDL):
         match = regex.match(url)
         if match:
             self.yt_id = match.group('id')
+            self.youtube = True
+        else:
+            self.youtube = False
 
     def get_video_info(self):
         if validators.url(self.youtube_url_or_search_term[0]):
             self.get_video_id(self.youtube_url_or_search_term[0])
-            self.video_info = self.extract_info("https://youtu.be/{0}".format(self.yt_id), download=False)
+            if self.youtube:
+                self.video_info = self.extract_info("https://youtu.be/{0}".format(self.yt_id), download=False)
+            else:
+                self.audio_url = self.youtube_url_or_search_term[0]
+                return
         else:
             sam_logger.debug(f"Searching for {' '.join(self.youtube_url_or_search_term)}")
             self.video_info = \
@@ -251,23 +259,28 @@ class Music(commands.Cog, name="Music"):
         if not voice_client.is_playing():
             self.servers[ctx.guild.id]['timer'] = SongTimer()
             self.servers[ctx.guild.id]['current_song'] = song
-            asyncio.run_coroutine_threadsafe(
-                ctx.send(f"Currently playing **{song.title}**"), self.bot.loop)
-            audio_path, requires_caching, real_audio_path = song.get_audio_url_or_path()
-            if requires_caching:
-                voice_client.play(source=FFmpegPCMAudio(audio_path))
-                self.servers[ctx.guild.id]['timer'].start()
-                song.download_thread.join()
-                if self.servers[ctx.guild.id]['skipping']:
-                    ctype_async_raise(self.servers[ctx.guild.id]['timer'].ident, StopIteration)
-                    self.servers[ctx.guild.id]['skipping'] = False
+            if song.youtube:
+                asyncio.run_coroutine_threadsafe(
+                    ctx.send(f"Currently playing **{song.title}**"), self.bot.loop)
+                audio_path, requires_caching, real_audio_path = song.get_audio_url_or_path()
+                if requires_caching:
+                    voice_client.play(source=FFmpegPCMAudio(audio_path), after=lambda e: self.play_next(ctx))
+                    self.servers[ctx.guild.id]['timer'].start()
+                    song.download_thread.join()
+                    if self.servers[ctx.guild.id]['skipping']:
+                        self.servers[ctx.guild.id]['current_song'] = None
+                        ctype_async_raise(self.servers[ctx.guild.id]['timer'].ident, StopIteration)
+                        self.servers[ctx.guild.id]['skipping'] = False
+                    else:
+                        voice_client.stop()
+                        voice_client.play(source=FFmpegPCMAudio(
+                            real_audio_path, before_options=f"-vn -ss {self.servers[ctx.guild.id]['timer'].seconds}"),
+                            after=lambda e: self.play_next(ctx))
                 else:
-                    voice_client.stop()
-                    voice_client.play(source=FFmpegPCMAudio(
-                        real_audio_path, before_options=f"-vn -ss {self.servers[ctx.guild.id]['timer'].seconds}"),
-                                      after=lambda e: self.play_next(ctx))
+                    voice_client.play(source=FFmpegPCMAudio(real_audio_path), after=lambda e: self.play_next(ctx))
+                    self.servers[ctx.guild.id]['timer'].start()
             else:
-                voice_client.play(source=FFmpegPCMAudio(real_audio_path), after=lambda e: self.play_next(ctx))
+                voice_client.play(source=FFmpegPCMAudio(song.audio_url), after=lambda e: self.play_next(ctx))
                 self.servers[ctx.guild.id]['timer'].start()
         else:
             self.servers[ctx.guild.id]['queue'].append(song)
@@ -294,14 +307,24 @@ class Music(commands.Cog, name="Music"):
 
         emb = discord.Embed(title="Queue")
         if self.servers[ctx.guild.id]['current_song']:
-            emb.add_field(name=f"Currently playing. {self.servers[ctx.guild.id]['current_song'].title}",
-                          value=self.servers[ctx.guild.id]['current_song'].duration['length'],
-                          inline=False)
+            if self.servers[ctx.guild.id]['current_song'].youtube:
+                emb.add_field(name=f"Currently playing. {self.servers[ctx.guild.id]['current_song'].title}",
+                              value=self.servers[ctx.guild.id]['current_song'].duration['length'],
+                              inline=False)
+            else:
+                emb.add_field(name=f"Currently playing. {self.servers[ctx.guild.id]['current_song'].audio_url}",
+                              value="MP3 URL",
+                              inline=False)
         if self.servers[ctx.guild.id]['queue']:
             for song in self.servers[ctx.guild.id]['queue']:
-                emb.add_field(name=f"{self.servers[ctx.guild.id]['queue'].index(song) + 1}. {song.title}",
-                              value=song.duration['length'],
-                              inline=False)
+                if self.servers[ctx.guild.id]['current_song'].youtube:
+                    emb.add_field(name=f"{self.servers[ctx.guild.id]['queue'].index(song) + 1}. {song.title}",
+                                  value=song.duration['length'],
+                                  inline=False)
+                else:
+                    emb.add_field(name=f"Currently playing. {self.servers[ctx.guild.id]['current_song'].audio_url}",
+                                  value="MP3 Url",
+                                  inline=False)
         else:
             emb.add_field(name="Nothing is queued", value="Use ,play to add something.")
         await ctx.send(embed=emb)
@@ -319,10 +342,14 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="playing", aliases=['np'])
     async def playing(self, ctx):
-        await ctx.send(
-            f"Playing song: **{self.servers[ctx.guild.id]['current_song'].title}**\n"
-            f"{seconds_to_minutes_display(round(self.servers[ctx.guild.id]['timer'].seconds))}/"
-            f"{self.servers[ctx.guild.id]['current_song'].duration['length']}")
+        if self.servers[ctx.guild.id]['current_song'].youtube:
+            await ctx.send(f"Playing song: **{self.servers[ctx.guild.id]['current_song'].title}**\n"
+                           f"{seconds_to_minutes_display(round(self.servers[ctx.guild.id]['timer'].seconds))}/"
+                           f"{self.servers[ctx.guild.id]['current_song'].duration['length']}")
+        else:
+            await ctx.send(f"Playing song: **{self.servers[ctx.guild.id]['current_song'].audio_url}** MP3 Url\n"
+                           f"{seconds_to_minutes_display(round(self.servers[ctx.guild.id]['timer'].seconds))}")
+
 
 
 def setup(bot):
