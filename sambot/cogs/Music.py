@@ -88,6 +88,7 @@ class GetSongData(threading.Thread):
             try:
                 song = self.list[0]
                 song[0].get_video_info()
+                print(song[0].youtube)
                 if song[1]:
                     threading.Thread(target=song[1], daemon=True).start()
                 self.list.pop(0)
@@ -264,13 +265,13 @@ class Music(commands.Cog, name="Music"):
                     ctx.send(f"Currently playing **{song.title}**"), self.bot.loop)
                 audio_path, requires_caching, real_audio_path = song.get_audio_url_or_path()
                 if requires_caching:
-                    voice_client.play(source=FFmpegPCMAudio(audio_path), after=lambda e: self.play_next(ctx))
+                    voice_client.play(source=FFmpegPCMAudio(audio_path))
                     self.servers[ctx.guild.id]['timer'].start()
                     song.download_thread.join()
                     if self.servers[ctx.guild.id]['skipping']:
                         self.servers[ctx.guild.id]['current_song'] = None
-                        ctype_async_raise(self.servers[ctx.guild.id]['timer'].ident, StopIteration)
                         self.servers[ctx.guild.id]['skipping'] = False
+                        self.play_next(ctx)
                     else:
                         voice_client.stop()
                         voice_client.play(source=FFmpegPCMAudio(
@@ -283,7 +284,9 @@ class Music(commands.Cog, name="Music"):
                 voice_client.play(source=FFmpegPCMAudio(song.audio_url), after=lambda e: self.play_next(ctx))
                 self.servers[ctx.guild.id]['timer'].start()
         else:
+
             self.servers[ctx.guild.id]['queue'].append(song)
+            print(song.audio_url)
 
     def play_next(self, ctx):
         ctype_async_raise(self.servers[ctx.guild.id]['timer'].ident, StopIteration)
@@ -304,6 +307,8 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="queue", aliases=["q"])
     async def queue(self, ctx):
         self.ensure_guild_in_list(ctx.guild.id)
+        print(self.servers[ctx.guild.id]['current_song'].youtube)
+        print(self.servers[ctx.guild.id]["queue"][0].youtube)
 
         emb = discord.Embed(title="Queue")
         if self.servers[ctx.guild.id]['current_song']:
@@ -323,7 +328,7 @@ class Music(commands.Cog, name="Music"):
                                   inline=False)
                 else:
                     emb.add_field(name=f"Currently playing. {self.servers[ctx.guild.id]['current_song'].audio_url}",
-                                  value="MP3 Url",
+                                  value="MP3 URL",
                                   inline=False)
         else:
             emb.add_field(name="Nothing is queued", value="Use ,play to add something.")

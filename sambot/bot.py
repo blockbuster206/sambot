@@ -45,7 +45,7 @@ activity = discord.Game("with you balls")
 cogs = (
     "General",
     "Utilities",
-    "Music"
+    # "Music"
 )
 
 

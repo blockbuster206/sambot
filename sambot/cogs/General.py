@@ -25,6 +25,21 @@ class General(commands.Cog, name="General"):
             rand_number = "000" + rand_number
         await ctx.send(f"Number Rolled: {rand_number}")
 
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        minecraft_channel_id = 963464111340007544
+        if message.channel.id == minecraft_channel_id:
+            if message.author.id == 963464417167683634:
+                channel = self.bot.get_channel(minecraft_channel_id)
+                messages = await channel.history().flatten()
+                webhook_messages = []
+                for msg in messages:
+                    if msg.author.id == 963464417167683634:
+                        webhook_messages.append(msg)
+                try:
+                    await webhook_messages[1].delete()
+                except:
+                    pass
 
 
 
