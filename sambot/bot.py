@@ -39,7 +39,7 @@ if not TOKEN:
         env.close()
 
 # discord bot status
-activity = discord.Game("with you balls")
+activity = discord.Game("among us")
 
 # cogs
 cogs = (
