@@ -1,42 +1,13 @@
+### SamBot by Blockbuster206
+
 import discord
 from discord.ext import commands
-import os
-import sys
 
-# logger
-import logging
+from sambot.tools import botenv
+from sambot.tools import botlogger
 
-# discord.py logging
-discord_logger = logging.getLogger('discord')
-discord_logger.setLevel(logging.INFO)
-# sambot's logger
-sam_logger = logging.getLogger("SAM-Bot")
-sam_logger.setLevel(logging.DEBUG)
-
-logFormatter = logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s')
-
-file_handler = logging.FileHandler(filename='bot.log', encoding='utf-8', mode='w')
-file_handler.setFormatter(logFormatter)
-discord_logger.addHandler(file_handler)
-sam_logger.addHandler(file_handler)
-
-consoleHandler = logging.StreamHandler()
-consoleHandler.setFormatter(logFormatter)
-discord_logger.addHandler(consoleHandler)
-sam_logger.addHandler(consoleHandler)
-
-# for the .env file and discord token
-from dotenv import load_dotenv
-
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-# if the .env file doesn't have the discord token in it
-if not TOKEN:
-    print("Token doesnt exist\nGo to https://discord.com/developers/applications to get your bot token")
-    TOKEN = input("Enter you bot token: ")
-    with open("../.env", 'w') as env:
-        env.write("DISCORD_TOKEN={TOKEN}".format(TOKEN=TOKEN))
-        env.close()
+botlogger.getLogger("discord", "info")
+loggr = botlogger.getLogger("sambot", "debug")
 
 # discord bot status
 activity = discord.Game("among us")
@@ -51,7 +22,8 @@ cogs = (
 
 class SamBot(commands.Bot):
     def __init__(self, command_prefix, self_bot):
-        commands.Bot.__init__(self, command_prefix=command_prefix, self_bot=self_bot, owner_id=346107577970458634)
+        commands.Bot.__init__(self, command_prefix=command_prefix, self_bot=self_bot, owner_id=346107577970458634,
+                              intents=discord.Intents.all())
         self.cogs_loaded = False
         self.bot_commands()
 
@@ -59,53 +31,46 @@ class SamBot(commands.Bot):
         @self.command(name="reload", aliases=['rd'], hidden=True)
         @commands.is_owner()
         async def reload(ctx):
-            sam_logger.info("Unloading Cogs")
-            # disconnect all voice clients while reloading
-            for voice_client in bot.voice_clients:
-                await voice_client.disconnect()
-            if not self.unload_cogs():
-                sam_logger.error("Cogs already unloaded baka")
-                await ctx.send("Cogs already unloaded baka")
-                return
-            sam_logger.debug("Reloading cogs")
-            if not self.load_cogs():
-                sam_logger.error("Already loaded cogs")
-                await ctx.send("Already loaded cogs")
-                return
-            sam_logger.info("Reloaded cogs")
-            await ctx.send("Reloaded Cogs")
+            if self.voice_clients: await self.disconnect_all_voice_clients()
+            loggr.debug("Unloading Cogs")
 
-    def load_cogs(self):
-        if not self.cogs_loaded:
-            for cog in cogs:
-                try:
-                    bot.load_extension("cogs.{cog}".format(cog=cog))
-                    sam_logger.debug("Loaded {cog_name}".format(cog_name=cog))
-                except commands.ExtensionNotFound:
-                    sam_logger.error("Cog Not found")
-            self.cogs_loaded = True
-            return True
-        return False
+            msg = await ctx.send("Reloading Cogs...")
 
-    def unload_cogs(self):
-        if self.cogs_loaded:
-            for cog in cogs:
-                bot.unload_extension("cogs.{cog}".format(cog=cog))
-                sam_logger.debug("Unloaded {cog_name}".format(cog_name=cog))
-            self.cogs_loaded = False
-            return True
-        return False
+            if self.cogs_loaded: await self.unload_cogs()
+            loggr.debug("Reloading Cogs")
+
+            await self.load_cogs()
+            loggr.debug("Reloaded cogs")
+            await msg.edit(content="Reloaded Cogs")
+
+    async def disconnect_all_voice_clients(self):
+        loggr.debug("Disconnecting all voice clients")
+        for voice_client in self.voice_clients:
+            await voice_client.disconnect()
+
+    async def load_cogs(self):
+        for cog in cogs:
+            try:
+                await bot.load_extension("cogs.{cog}".format(cog=cog))
+            except commands.ExtensionNotFound:
+                loggr.error("Cog not found")
+        self.cogs_loaded = True
+
+    async def unload_cogs(self):
+        for cog in cogs:
+            await bot.unload_extension(f"cogs.{cog}")
+        self.cogs_loaded = False
 
     async def on_ready(self):
-        sam_logger.info("{username} is online".format(username=self.user.name))
+        loggr.info("{username} is online".format(username=self.user.name))
         await self.change_presence(status=discord.Status.online, activity=activity)
-        sam_logger.debug("Loading Cogs")
-        self.load_cogs()
-        sam_logger.info("SAM-Bot is ready")
+        loggr.debug("Loading Cogs")
+        await self.load_cogs()
+        loggr.info("SamBot is ready")
 
     async def on_command_error(self, ctx, error):
         if isinstance(error, commands.CommandError):
-            sam_logger.error(error)
+            loggr.error(error)
 
         if isinstance(error, commands.MissingRequiredArgument):
             params = []
@@ -114,5 +79,5 @@ class SamBot(commands.Bot):
             await ctx.send('Missing Arguments: {args}'.format(args=", ".join(params)))
 
 
-bot = SamBot(command_prefix=",", self_bot=False)
-bot.run(TOKEN)
+bot = SamBot(command_prefix=",", self_bot=False, )
+bot.run(botenv.getBotToken(), log_handler=None)
