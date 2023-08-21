@@ -2,7 +2,7 @@ from discord.ext import commands
 
 from sambot.tools import botlogger
 
-loggr, cog_name = botlogger.getCogLogger(__name__)
+loggr = botlogger.getSubLogger(__name__)
 
 
 class Utilities(commands.Cog, name="Utilities"):
@@ -17,9 +17,8 @@ class Utilities(commands.Cog, name="Utilities"):
 
 async def setup(bot):
     await bot.add_cog(Utilities(bot))
-    loggr.debug(f"Loaded {cog_name}")
+    loggr.debug("[ LOADED ]")
 
 
 async def teardown(bot):
     await bot.remove_cog("Utilities")
-    loggr.debug(f"Unloaded {cog_name}")

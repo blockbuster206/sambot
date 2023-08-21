@@ -7,7 +7,9 @@ from sambot.tools import botenv
 from sambot.tools import botlogger
 
 botlogger.getLogger("discord", "info")
-loggr = botlogger.getLogger("sambot", "debug")
+botlogger.getLogger("sambot", "debug")
+cl_loggr = botlogger.getSubLogger("client")
+loggr = botlogger.getSubLogger("bot")
 
 # discord bot status
 activity = discord.Game("among us")
@@ -16,6 +18,7 @@ activity = discord.Game("among us")
 cogs = (
     "General",
     "Utilities",
+    "Internet"
     # "Music"
 )
 
@@ -31,42 +34,46 @@ class SamBot(commands.Bot):
         @self.command(name="reload", aliases=['rd'], hidden=True)
         @commands.is_owner()
         async def reload(ctx):
-            if self.voice_clients: await self.disconnect_all_voice_clients()
-            loggr.debug("Unloading Cogs")
-
+            cl_loggr.info(f"reloading cogs...")
             msg = await ctx.send("Reloading Cogs...")
 
+            if self.voice_clients: await self.disconnect_all_voice_clients()
             if self.cogs_loaded: await self.unload_cogs()
-            loggr.debug("Reloading Cogs")
+            loggr.debug("reloading cogs")
 
             await self.load_cogs()
-            loggr.debug("Reloaded cogs")
+            loggr.debug("reloaded cogs")
             await msg.edit(content="Reloaded Cogs")
 
     async def disconnect_all_voice_clients(self):
-        loggr.debug("Disconnecting all voice clients")
+        loggr.debug("disconnecting all voice clients")
         for voice_client in self.voice_clients:
             await voice_client.disconnect()
 
     async def load_cogs(self):
+        loggr.info("loading cogs")
+        amt_cog_loaded = 0
         for cog in cogs:
             try:
                 await bot.load_extension("cogs.{cog}".format(cog=cog))
+                amt_cog_loaded += 1
             except commands.ExtensionNotFound:
-                loggr.error("Cog not found")
+                loggr.error("cog not found")
+            except commands.ExtensionFailed as err:
+                loggr.error(f"{cog.lower()} [ FAILED ] ({err})")
+        loggr.info(f"{amt_cog_loaded}/{len(cogs)} cogs loaded")
         self.cogs_loaded = True
 
     async def unload_cogs(self):
+        loggr.debug("unloading cogs")
         for cog in cogs:
             await bot.unload_extension(f"cogs.{cog}")
         self.cogs_loaded = False
 
     async def on_ready(self):
-        loggr.info("{username} is online".format(username=self.user.name))
         await self.change_presence(status=discord.Status.online, activity=activity)
-        loggr.debug("Loading Cogs")
         await self.load_cogs()
-        loggr.info("SamBot is ready")
+        cl_loggr.info("[ READY ]")
 
     async def on_command_error(self, ctx, error):
         if isinstance(error, commands.CommandError):
@@ -80,4 +87,5 @@ class SamBot(commands.Bot):
 
 
 bot = SamBot(command_prefix=",", self_bot=False, )
-bot.run(botenv.getBotToken(), log_handler=None)
+TOKEN = botenv.getBotToken()
+bot.run(TOKEN, log_handler=None)

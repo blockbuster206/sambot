@@ -5,7 +5,7 @@ import random
 
 from sambot.tools import botlogger
 
-loggr, cog_name = botlogger.getCogLogger(__name__)
+loggr = botlogger.getSubLogger(__name__)
 
 
 class General(commands.Cog, name="General"):
@@ -19,9 +19,8 @@ class General(commands.Cog, name="General"):
 
 async def setup(bot):
     await bot.add_cog(General(bot))
-    loggr.debug(f"Loaded {cog_name}")
+    loggr.debug("[ LOADED ]")
 
 
 async def teardown(bot):
     await bot.remove_cog("General")
-    loggr.debug(f"Unloaded {cog_name}")
