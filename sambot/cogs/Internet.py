@@ -16,22 +16,32 @@ class Internet(commands.Cog, name="Internet"):
     @commands.command(name="insta", aliases=['ig'])
     async def insta(self, ctx, link):
 
+        link = link.split("?")[0]
+
         await ctx.message.delete()
 
         msg = await ctx.send(f"Request by **{ctx.author.name}**, getting instagram media...")
 
         media = self.instadl.dl_post(link)
 
+        if isinstance(media, str):
+            await msg.edit(content=f"Request by **{ctx.author.name}**, couldn't get media. Here is the link! https://www.ddinstagram.com/reel/{media}")
+            return
+
+        await msg.edit(content=f"Request by **{ctx.author.name}**, uploading instagram media...")
+
         files = []
 
         for i in media[1:]:
             files.append(discord.File(i))
 
+        await ctx.send(f"Requested by {ctx.author.mention}: **{media[0]['caption']}**", files=files)
         await msg.delete()
-        await ctx.send(f"Requested by {ctx.author.mention}: **{media[0]}**", files=files)
 
         for i in media[1:]:
             os.remove(i)
+
+        loggr.debug(f"Deleted {media[0]['shortcode']} media")
 
 
 async def setup(bot):

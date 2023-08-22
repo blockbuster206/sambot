@@ -2,6 +2,7 @@
 
 import discord
 from discord.ext import commands
+from instaloader import BadResponseException
 
 from sambot.tools import botenv
 from sambot.tools import botlogger
